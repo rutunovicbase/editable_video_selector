@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'video_selector/video_selector.dart';
+import 'package:editable_video_picker/video_selector.dart';
 import 'dart:io';
 
 void main() {
@@ -12,7 +12,7 @@ class VideoSelectorExample extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Video Selector Example',
+      title: 'Video Selector Demo',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
@@ -31,6 +31,7 @@ class VideoPickerDemo extends StatefulWidget {
 
 class _VideoPickerDemoState extends State<VideoPickerDemo> {
   File? _selectedVideoFile;
+  VideoPickerConfig _currentConfig = VideoPickerConfig.defaultConfig();
   bool _isProcessing = false;
 
   Future<void> _pickVideo(VideoSource source) async {
@@ -43,12 +44,7 @@ class _VideoPickerDemoState extends State<VideoPickerDemo> {
       final File? videoFile = await VideoPicker.pickVideo(
         context: context,
         source: source,
-        config: VideoPickerConfig.withEditorParams(
-          minDuration: Duration(seconds: 10), // Minimum 10 seconds
-          maxDuration: Duration(seconds: 30), // Maximum 30 seconds
-          enableHandleDrag: true, // Enable handle dragging within constraints
-          enableMiddleDrag: true, // Always allow middle drag
-        ),
+        config: _currentConfig,
       );
 
       if (videoFile != null && mounted) {

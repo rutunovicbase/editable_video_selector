@@ -1,4 +1,4 @@
-package com.example.inherited_bloc
+package com.example.editable_video_picker
 
 import io.flutter.embedding.android.FlutterActivity
 
