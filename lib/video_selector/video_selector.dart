@@ -84,3 +84,6 @@ export 'models/trim_data.dart';
 export 'interfaces/i_video_selection_strategy.dart';
 export 'interfaces/i_video_trimmer.dart';
 export 'interfaces/i_permission_handler.dart';
+
+export 'models/video_picker_result.dart';
+export 'models/trim_data.dart';

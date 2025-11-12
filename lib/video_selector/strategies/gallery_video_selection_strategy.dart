@@ -19,15 +19,8 @@ class GalleryVideoSelectionStrategy implements IVideoSelectionStrategy {
   Future<VideoFile?> selectVideo() async {
     try {
       // Request storage permission
-      debugPrint('📱 Gallery: Requesting storage permission...');
-      final hasPermission = await _permissionHandler.requestStoragePermission();
 
-      if (!hasPermission) {
-        debugPrint('❌ Gallery: Storage permission denied');
-        return null;
-      }
-
-      debugPrint('✅ Gallery: Permission granted, opening picker...');
+      debugPrint('📱 Gallery: Opening picker...');
 
       final XFile? video = await _picker.pickVideo(
         source: ImageSource.gallery,

@@ -1,21 +1,19 @@
 import 'dart:io';
+import 'package:editable_video_picker/video_selector/services/permission_service.dart';
 import 'package:flutter/material.dart';
 import 'models/video_file.dart';
 import 'models/video_selection_source.dart';
 import 'models/editor_config.dart';
+import 'models/video_picker_result.dart'; // ✅ Add this import
+import 'models/trim_data.dart'; // ✅ Add this import
 import 'services/video_selection_service.dart';
 import 'services/video_trimmer_service.dart';
 import 'screens/camera_recorder_screen.dart';
 
 /// Configuration for the entire video picker flow
 class VideoPickerConfig {
-  // Camera configuration
   final CameraRecorderConfig? cameraConfig;
-
-  // Editor configuration (controls min/max duration and drag behavior)
   final EditorConfig editorConfig;
-
-  // Flow configuration
   final bool autoTrim;
   final bool requireEditing;
 
@@ -26,7 +24,6 @@ class VideoPickerConfig {
     this.requireEditing = true,
   });
 
-  /// Backward compatibility: Create config with individual editor params
   factory VideoPickerConfig.withEditorParams({
     CameraRecorderConfig? cameraConfig,
     Duration maxDuration = const Duration(seconds: 30),
@@ -64,35 +61,12 @@ class VideoPickerConfig {
   );
 }
 
-/// Main Video Picker Package API
-///
-/// Use this class to pick and process videos in your Flutter app.
-/// Returns a processed video File ready to use.
-///
-/// Example:
-/// ```dart
-/// final File? videoFile = await VideoPicker.pickVideo(
-///   context: context,
-///   source: VideoSource.camera,
-///   config: VideoPickerConfig.social(),
-/// );
-///
-/// if (videoFile != null) {
-///   // Use the processed video file
-/// }
-/// ```
 class VideoPicker {
-  VideoPicker._(); // Private constructor to prevent instantiation
+  VideoPicker._();
 
-  /// Pick a video from camera or gallery with optional editing
-  ///
-  /// Returns a [File] containing the processed video, or null if cancelled.
-  ///
-  /// Parameters:
-  /// - [context]: BuildContext for navigation
-  /// - [source]: VideoSource.camera or VideoSource.gallery
-  /// - [config]: Optional configuration for camera, editor, and flow
-  static Future<File?> pickVideo({
+  static final _permissionService = PermissionService();
+
+  static Future<VideoPickerResult?> pickVideoWithTrimData({
     required BuildContext context,
     required VideoSource source,
     VideoPickerConfig config = const VideoPickerConfig(),
@@ -109,10 +83,7 @@ class VideoPicker {
         selectedVideo = await _pickFromCamera(context, config);
       } else {
         debugPrint('📱 VideoPicker: Opening gallery...');
-        selectedVideo = await videoSelectionService.selectVideo(
-          context: context,
-          source: VideoSelectionSource.gallery,
-        );
+        selectedVideo = await videoSelectionService.selectVideo(context: context, source: VideoSelectionSource.gallery);
       }
 
       if (selectedVideo == null) {
@@ -127,96 +98,85 @@ class VideoPicker {
 
       debugPrint('✅ VideoPicker: Video selected: ${selectedVideo.path}');
 
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => PopScope(
+            canPop: false,
+            child: Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFA561CA)),
+              ),
+            ),
+          ),
+        );
+      }
+
       // Step 2: Edit video (if required)
+      TrimData? trimData;
+
       if (config.requireEditing) {
         debugPrint('✂️ VideoPicker: Opening editor...');
-        final trimData = await videoTrimmerService.showTrimmerUI(
-          selectedVideo,
-          editorConfig: config.editorConfig,
-        );
+        trimData = await videoTrimmerService.showTrimmerUI(selectedVideo, editorConfig: config.editorConfig);
+
+        if (context.mounted) {
+          Navigator.of(context).pop();
+        }
 
         if (trimData == null || !context.mounted) {
           debugPrint('ℹ️ VideoPicker: Editing cancelled');
-          return null; // User cancelled editing
-        }
-
-        debugPrint(
-          '✅ VideoPicker: Trim data received: ${trimData.startTime} - ${trimData.endTime}',
-        );
-
-        // Step 3: Process/trim video (if needed)
-        if (config.autoTrim) {
-          debugPrint('🔧 VideoPicker: Processing video...');
-          final processedVideo = await videoTrimmerService.trimVideo(
-            selectedVideo,
-            trimData,
-          );
-
-          if (processedVideo != null) {
-            debugPrint(
-              '✅ VideoPicker: Video processed: ${processedVideo.path}',
-            );
-            return File(processedVideo.path);
-          }
-          debugPrint('❌ VideoPicker: Video processing failed');
           return null;
-        } else {
-          // Return original video file
-          debugPrint('✅ VideoPicker: Returning original video (no trim)');
-          return File(selectedVideo.path);
         }
+
+        debugPrint('✅ VideoPicker: Trim data received: ${trimData.startTime} - ${trimData.endTime}');
       } else {
-        // No editing required, return original
-        debugPrint('✅ VideoPicker: Returning original video (no editing)');
-        return File(selectedVideo.path);
+        if (context.mounted) {
+          Navigator.of(context).pop();
+        }
       }
+
+      // Return both video file and trim data
+      debugPrint('✅ VideoPicker: Returning video with trim data');
+      return VideoPickerResult(videoFile: File(selectedVideo.path), trimData: trimData);
     } catch (e, stackTrace) {
       debugPrint('❌ VideoPicker error: $e');
       debugPrint('Stack trace: $stackTrace');
+
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
       return null;
     }
   }
 
-  /// Pick a video from camera
-  static Future<VideoFile?> _pickFromCamera(
-    BuildContext context,
-    VideoPickerConfig config,
-  ) async {
-    final cameraConfig =
-        config.cameraConfig ?? CameraRecorderConfig.defaultConfig();
+  /// OLD: Keep for backward compatibility
+  static Future<File?> pickVideo({
+    required BuildContext context,
+    required VideoSource source,
+    VideoPickerConfig config = const VideoPickerConfig(),
+  }) async {
+    final result = await pickVideoWithTrimData(context: context, source: source, config: config);
+    return result?.videoFile;
+  }
+
+  static Future<VideoFile?> _pickFromCamera(BuildContext context, VideoPickerConfig config) async {
+    final cameraConfig = config.cameraConfig ?? CameraRecorderConfig.defaultConfig();
 
     if (!context.mounted) return null;
 
     final video = await Navigator.push<VideoFile>(
       context,
-      MaterialPageRoute(
-        builder: (context) => CameraRecorderScreen(config: cameraConfig),
-      ),
+      MaterialPageRoute(builder: (context) => CameraRecorderScreen(config: cameraConfig)),
     );
 
     return video;
   }
-
-  /// Pick multiple videos (future feature)
-  static Future<List<File>?> pickMultipleVideos({
-    required BuildContext context,
-    VideoPickerConfig config = const VideoPickerConfig(),
-  }) async {
-    // TODO: Implement multiple video selection
-    throw UnimplementedError('Multiple video selection coming soon');
-  }
-
-  /// Get video info without picking
-  static Future<VideoInfo?> getVideoInfo(File videoFile) async {
-    // TODO: Implement video info extraction
-    throw UnimplementedError('Video info extraction coming soon');
-  }
 }
 
-/// Video source enum for better API
 enum VideoSource { camera, gallery }
 
-/// Video information class (future feature)
 class VideoInfo {
   final Duration duration;
   final int width;
