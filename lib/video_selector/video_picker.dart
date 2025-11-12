@@ -98,6 +98,21 @@ class VideoPicker {
 
       debugPrint('✅ VideoPicker: Video selected: ${selectedVideo.path}');
 
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => PopScope(
+            canPop: false,
+            child: Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFA561CA)),
+              ),
+            ),
+          ),
+        );
+      }
+
       // Step 2: Edit video (if required)
       TrimData? trimData;
 
@@ -105,12 +120,20 @@ class VideoPicker {
         debugPrint('✂️ VideoPicker: Opening editor...');
         trimData = await videoTrimmerService.showTrimmerUI(selectedVideo, editorConfig: config.editorConfig);
 
+        if (context.mounted) {
+          Navigator.of(context).pop();
+        }
+
         if (trimData == null || !context.mounted) {
           debugPrint('ℹ️ VideoPicker: Editing cancelled');
           return null;
         }
 
         debugPrint('✅ VideoPicker: Trim data received: ${trimData.startTime} - ${trimData.endTime}');
+      } else {
+        if (context.mounted) {
+          Navigator.of(context).pop();
+        }
       }
 
       // Return both video file and trim data
@@ -119,6 +142,11 @@ class VideoPicker {
     } catch (e, stackTrace) {
       debugPrint('❌ VideoPicker error: $e');
       debugPrint('Stack trace: $stackTrace');
+
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
       return null;
     }
   }
