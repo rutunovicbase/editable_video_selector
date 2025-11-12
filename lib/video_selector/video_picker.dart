@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'models/video_file.dart';
 import 'models/video_selection_source.dart';
 import 'models/editor_config.dart';
-import 'models/video_picker_result.dart';  // ✅ Add this import
-import 'models/trim_data.dart';            // ✅ Add this import
+import 'models/video_picker_result.dart'; // ✅ Add this import
+import 'models/trim_data.dart'; // ✅ Add this import
 import 'services/video_selection_service.dart';
 import 'services/video_trimmer_service.dart';
 import 'screens/camera_recorder_screen.dart';
@@ -72,28 +72,6 @@ class VideoPicker {
     VideoPickerConfig config = const VideoPickerConfig(),
   }) async {
     try {
-      debugPrint('🔐 VideoPicker: Checking permissions...');
-
-      bool hasPermission = false;
-
-      if (source == VideoSource.camera) {
-        // Request camera + mic + storage for recording
-        hasPermission = await _permissionService.requestAllVideoPermissions();
-        if (!hasPermission) {
-          debugPrint('❌ VideoPicker: Camera permissions denied');
-          return null;
-        }
-      } else {
-        // Request storage for gallery
-        hasPermission = await _permissionService.requestStoragePermission();
-        if (!hasPermission) {
-          debugPrint('❌ VideoPicker: Storage permission denied');
-          return null;
-        }
-      }
-
-      debugPrint('✅ VideoPicker: Permissions granted');
-
       final videoSelectionService = VideoSelectionService();
       final videoTrimmerService = VideoTrimmerService(context: context);
 
@@ -105,10 +83,7 @@ class VideoPicker {
         selectedVideo = await _pickFromCamera(context, config);
       } else {
         debugPrint('📱 VideoPicker: Opening gallery...');
-        selectedVideo = await videoSelectionService.selectVideo(
-          context: context,
-          source: VideoSelectionSource.gallery,
-        );
+        selectedVideo = await videoSelectionService.selectVideo(context: context, source: VideoSelectionSource.gallery);
       }
 
       if (selectedVideo == null) {
@@ -128,28 +103,19 @@ class VideoPicker {
 
       if (config.requireEditing) {
         debugPrint('✂️ VideoPicker: Opening editor...');
-        trimData = await videoTrimmerService.showTrimmerUI(
-          selectedVideo,
-          editorConfig: config.editorConfig,
-        );
+        trimData = await videoTrimmerService.showTrimmerUI(selectedVideo, editorConfig: config.editorConfig);
 
         if (trimData == null || !context.mounted) {
           debugPrint('ℹ️ VideoPicker: Editing cancelled');
           return null;
         }
 
-        debugPrint(
-          '✅ VideoPicker: Trim data received: ${trimData.startTime} - ${trimData.endTime}',
-        );
+        debugPrint('✅ VideoPicker: Trim data received: ${trimData.startTime} - ${trimData.endTime}');
       }
 
       // Return both video file and trim data
       debugPrint('✅ VideoPicker: Returning video with trim data');
-      return VideoPickerResult(
-        videoFile: File(selectedVideo.path),
-        trimData: trimData,
-      );
-
+      return VideoPickerResult(videoFile: File(selectedVideo.path), trimData: trimData);
     } catch (e, stackTrace) {
       debugPrint('❌ VideoPicker error: $e');
       debugPrint('Stack trace: $stackTrace');
@@ -163,28 +129,18 @@ class VideoPicker {
     required VideoSource source,
     VideoPickerConfig config = const VideoPickerConfig(),
   }) async {
-    final result = await pickVideoWithTrimData(
-      context: context,
-      source: source,
-      config: config,
-    );
+    final result = await pickVideoWithTrimData(context: context, source: source, config: config);
     return result?.videoFile;
   }
 
-  static Future<VideoFile?> _pickFromCamera(
-      BuildContext context,
-      VideoPickerConfig config,
-      ) async {
-    final cameraConfig =
-        config.cameraConfig ?? CameraRecorderConfig.defaultConfig();
+  static Future<VideoFile?> _pickFromCamera(BuildContext context, VideoPickerConfig config) async {
+    final cameraConfig = config.cameraConfig ?? CameraRecorderConfig.defaultConfig();
 
     if (!context.mounted) return null;
 
     final video = await Navigator.push<VideoFile>(
       context,
-      MaterialPageRoute(
-        builder: (context) => CameraRecorderScreen(config: cameraConfig),
-      ),
+      MaterialPageRoute(builder: (context) => CameraRecorderScreen(config: cameraConfig)),
     );
 
     return video;
