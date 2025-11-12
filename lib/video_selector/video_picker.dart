@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:editable_video_picker/video_selector/services/permission_service.dart';
 import 'package:flutter/material.dart';
 import 'models/video_file.dart';
 import 'models/video_selection_source.dart';
@@ -63,13 +64,36 @@ class VideoPickerConfig {
 class VideoPicker {
   VideoPicker._();
 
-  /// ✅ NEW: Pick video and return result with trim data
+  static final _permissionService = PermissionService();
+
   static Future<VideoPickerResult?> pickVideoWithTrimData({
     required BuildContext context,
     required VideoSource source,
     VideoPickerConfig config = const VideoPickerConfig(),
   }) async {
     try {
+      debugPrint('🔐 VideoPicker: Checking permissions...');
+
+      bool hasPermission = false;
+
+      if (source == VideoSource.camera) {
+        // Request camera + mic + storage for recording
+        hasPermission = await _permissionService.requestAllVideoPermissions();
+        if (!hasPermission) {
+          debugPrint('❌ VideoPicker: Camera permissions denied');
+          return null;
+        }
+      } else {
+        // Request storage for gallery
+        hasPermission = await _permissionService.requestStoragePermission();
+        if (!hasPermission) {
+          debugPrint('❌ VideoPicker: Storage permission denied');
+          return null;
+        }
+      }
+
+      debugPrint('✅ VideoPicker: Permissions granted');
+
       final videoSelectionService = VideoSelectionService();
       final videoTrimmerService = VideoTrimmerService(context: context);
 
@@ -119,7 +143,7 @@ class VideoPicker {
         );
       }
 
-      // ✅ Return both video file and trim data (no processing here)
+      // Return both video file and trim data
       debugPrint('✅ VideoPicker: Returning video with trim data');
       return VideoPickerResult(
         videoFile: File(selectedVideo.path),
