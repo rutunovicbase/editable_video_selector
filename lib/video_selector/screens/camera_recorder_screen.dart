@@ -420,9 +420,13 @@ class _CameraRecorderScreenState extends State<CameraRecorderScreen>
             onScaleStart: widget.config.enableZoom ? _handleScaleStart : null,
             onScaleUpdate: widget.config.enableZoom ? _handleScaleUpdate : null,
             onScaleEnd: widget.config.enableZoom ? _handleScaleEnd : null,
-            child: CameraPreview(_controller!),
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: _controller!.value.aspectRatio,
+                child: CameraPreview(_controller!),
+              ),
+            ),
           ),
-
           // Countdown overlay
           if (_isCountingDown)
             Container(
