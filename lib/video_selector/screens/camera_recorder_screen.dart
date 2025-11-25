@@ -416,22 +416,24 @@ class _CameraRecorderScreenState extends State<CameraRecorderScreen>
         fit: StackFit.expand,
         children: [
           // Camera preview with pinch to zoom
+
           GestureDetector(
-  onScaleStart: widget.config.enableZoom ? _handleScaleStart : null,
-  onScaleUpdate: widget.config.enableZoom ? _handleScaleUpdate : null,
-  onScaleEnd: widget.config.enableZoom ? _handleScaleEnd : null,
-  child: Center(
-    child: _controller!.value.aspectRatio > 1
-        ? AspectRatio(
-            aspectRatio: _controller!.value.aspectRatio,
-            child: CameraPreview(_controller!),
-          )
-        : AspectRatio(
-            aspectRatio: 1 / _controller!.value.aspectRatio,
-            child: CameraPreview(_controller!),
+            onScaleStart: widget.config.enableZoom ? _handleScaleStart : null,
+            onScaleUpdate: widget.config.enableZoom ? _handleScaleUpdate : null,
+            onScaleEnd: widget.config.enableZoom ? _handleScaleEnd : null,
+            child: // Camera preview with pinch to zoom - Fixed 9:16 ratio
+            GestureDetector(
+              onScaleStart: widget.config.enableZoom ? _handleScaleStart : null,
+              onScaleUpdate: widget.config.enableZoom ? _handleScaleUpdate : null,
+              onScaleEnd: widget.config.enableZoom ? _handleScaleEnd : null,
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: 9 / 16,
+                  child: CameraPreview(_controller!),
+                ),
+              ),
+            ),
           ),
-  ),
-),
 
           // Countdown overlay
           if (_isCountingDown)
