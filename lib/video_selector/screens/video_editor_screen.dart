@@ -129,26 +129,78 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
       final duration = _controller!.value.duration;
       final interval = duration.inMilliseconds ~/ _thumbnailCount;
 
+      // Check video file size - skip thumbnails for very large files
+      final videoFile = File(widget.videoFile.path);
+      final fileSizeInMB = await videoFile.length() / (1024 * 1024);
+
+      if (fileSizeInMB > 500) {
+        debugPrint(
+          '⚠️ Video too large (${fileSizeInMB.toStringAsFixed(1)}MB) - skipping thumbnail generation',
+        );
+        // Fill with nulls to show placeholders
+        if (mounted) {
+          setState(() {
+            _thumbnails.addAll(List.filled(_thumbnailCount, null));
+            _isGeneratingThumbnails = false;
+          });
+        }
+        return;
+      }
+
       for (int i = 0; i < _thumbnailCount; i++) {
+        if (!mounted) break;
+
         final timeMs = i * interval;
 
         // Ensure we don't request thumbnails beyond video duration
         final clampedTimeMs = timeMs.clamp(0, duration.inMilliseconds - 100);
 
         try {
-          final thumbnail = await VideoThumbnail.thumbnailFile(
-            video: widget.videoFile.path,
-            thumbnailPath: (await getTemporaryDirectory()).path,
-            imageFormat: ImageFormat.PNG,
-            maxHeight: 80,
-            timeMs: clampedTimeMs,
-            quality: 75,
-          );
+          // Add timeout for thumbnail generation
+          final thumbnail =
+              await VideoThumbnail.thumbnailFile(
+                video: widget.videoFile.path,
+                thumbnailPath: (await getTemporaryDirectory()).path,
+                imageFormat: ImageFormat.PNG,
+                maxHeight: 80,
+                timeMs: clampedTimeMs,
+                quality: 75,
+              ).timeout(
+                const Duration(seconds: 5),
+                onTimeout: () {
+                  debugPrint(
+                    '⏱️ Thumbnail generation timeout at ${clampedTimeMs}ms',
+                  );
+                  return null;
+                },
+              );
 
-          if (mounted) {
-            setState(() {
-              _thumbnails.add(thumbnail);
-            });
+          // Verify thumbnail file exists and is valid
+          if (thumbnail != null) {
+            final thumbnailFile = File(thumbnail);
+            final exists = await thumbnailFile.exists();
+            if (exists && await thumbnailFile.length() > 0) {
+              if (mounted) {
+                setState(() {
+                  _thumbnails.add(thumbnail);
+                });
+              }
+            } else {
+              debugPrint(
+                '⚠️ Thumbnail file invalid or empty at ${clampedTimeMs}ms',
+              );
+              if (mounted) {
+                setState(() {
+                  _thumbnails.add(null);
+                });
+              }
+            }
+          } else {
+            if (mounted) {
+              setState(() {
+                _thumbnails.add(null);
+              });
+            }
           }
         } catch (e) {
           // Add null for failed thumbnails
@@ -164,6 +216,15 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
       }
     } catch (e) {
       debugPrint('⚠️ Thumbnail generation error: $e');
+      // Fill remaining slots with nulls
+      if (mounted) {
+        final remaining = _thumbnailCount - _thumbnails.length;
+        if (remaining > 0) {
+          setState(() {
+            _thumbnails.addAll(List.filled(remaining, null));
+          });
+        }
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -511,9 +572,25 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
                                     ),
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(2),
-                                      image: DecorationImage(
-                                        image: FileImage(File(thumbnail)),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(2),
+                                      child: Image.file(
+                                        File(thumbnail),
                                         fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          debugPrint(
+                                            '❌ Error loading thumbnail: $error',
+                                          );
+                                          return Container(
+                                            color: Colors.grey[800],
+                                            child: Icon(
+                                              Icons.broken_image,
+                                              color: Colors.grey[600],
+                                              size: 16,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                   ),
