@@ -127,28 +127,104 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
 
     try {
       final duration = _controller!.value.duration;
-      final interval = duration.inMilliseconds ~/ _thumbnailCount;
+      final videoFile = File(widget.videoFile.path);
+      final fileSizeInMB = await videoFile.length() / (1024 * 1024);
+
+      // For very long videos (>500MB or >10 min), generate thumbnails from first 3 minutes only
+      final Duration effectiveDuration;
+      if (fileSizeInMB > 500 || duration.inMinutes > 10) {
+        effectiveDuration =
+            Duration(minutes: 3).inMilliseconds < duration.inMilliseconds
+            ? const Duration(minutes: 3)
+            : duration;
+        debugPrint(
+          '📹 Large video (${fileSizeInMB.toStringAsFixed(1)}MB, ${duration.inMinutes}min) - generating thumbnails from first ${effectiveDuration.inSeconds}s',
+        );
+      } else {
+        effectiveDuration = duration;
+      }
+
+      final interval = effectiveDuration.inMilliseconds ~/ _thumbnailCount;
 
       for (int i = 0; i < _thumbnailCount; i++) {
+        if (!mounted) break;
+
         final timeMs = i * interval;
 
-        // Ensure we don't request thumbnails beyond video duration
-        final clampedTimeMs = timeMs.clamp(0, duration.inMilliseconds - 100);
+        // Ensure we don't request thumbnails beyond effective duration
+        final clampedTimeMs = timeMs.clamp(
+          0,
+          effectiveDuration.inMilliseconds - 100,
+        );
+
+        debugPrint(
+          '📹 Generating thumbnail ${i + 1} of $_thumbnailCount at ${clampedTimeMs}ms',
+        );
 
         try {
-          final thumbnail = await VideoThumbnail.thumbnailFile(
-            video: widget.videoFile.path,
-            thumbnailPath: (await getTemporaryDirectory()).path,
-            imageFormat: ImageFormat.PNG,
-            maxHeight: 80,
-            timeMs: clampedTimeMs,
-            quality: 75,
-          );
+          // Add timeout for thumbnail generation
+          final thumbnail =
+              await VideoThumbnail.thumbnailFile(
+                video: widget.videoFile.path,
+                thumbnailPath: (await getTemporaryDirectory()).path,
+                imageFormat: ImageFormat.PNG,
+                maxHeight: 80,
+                timeMs: clampedTimeMs,
+                quality: 75,
+              ).timeout(
+                const Duration(seconds: 5),
+                onTimeout: () {
+                  debugPrint(
+                    '⏱️ Thumbnail generation timeout at ${clampedTimeMs}ms',
+                  );
+                  return null;
+                },
+              );
 
-          if (mounted) {
-            setState(() {
-              _thumbnails.add(thumbnail);
-            });
+          // Verify thumbnail file exists and is valid
+          if (thumbnail != null) {
+            final thumbnailFile = File(thumbnail);
+
+            // Retry logic - file might need time to be written
+            bool isValid = false;
+            for (int retry = 0; retry < 3; retry++) {
+              if (!mounted) break;
+
+              final exists = await thumbnailFile.exists();
+              if (exists) {
+                await Future.delayed(Duration(milliseconds: 50 * (retry + 1)));
+                final size = await thumbnailFile.length();
+                if (size > 0) {
+                  isValid = true;
+                  break;
+                }
+              }
+
+              if (retry < 2) {
+                await Future.delayed(Duration(milliseconds: 100));
+              }
+            }
+
+            if (isValid && mounted) {
+              setState(() {
+                _thumbnails.add(thumbnail);
+              });
+            } else {
+              debugPrint(
+                '⚠️ Thumbnail file invalid or empty at ${clampedTimeMs}ms after retries',
+              );
+              if (mounted) {
+                setState(() {
+                  _thumbnails.add(null);
+                });
+              }
+            }
+          } else {
+            if (mounted) {
+              setState(() {
+                _thumbnails.add(null);
+              });
+            }
           }
         } catch (e) {
           // Add null for failed thumbnails
@@ -164,6 +240,15 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
       }
     } catch (e) {
       debugPrint('⚠️ Thumbnail generation error: $e');
+      // Fill remaining slots with nulls
+      if (mounted) {
+        final remaining = _thumbnailCount - _thumbnails.length;
+        if (remaining > 0) {
+          setState(() {
+            _thumbnails.addAll(List.filled(remaining, null));
+          });
+        }
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -212,12 +297,12 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
         }
 
         debugPrint(
-          '🔒 Start drag: Locked at MAX ${widget.maxDuration} (tried ${newDuration})',
+          '🔒 Start drag: Locked at MAX ${widget.maxDuration} (tried $newDuration)',
         );
       } else {
         // Within constraints - allow the change
         _startTime = newStart;
-        debugPrint('✅ Start drag: ${_startTime} → duration: $newDuration');
+        debugPrint('✅ Start drag: $_startTime → duration: $newDuration');
       }
     });
 
@@ -456,8 +541,16 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
               final endPosition =
                   _endTime.inMilliseconds / videoDuration.inMilliseconds;
 
+              debugPrint(
+                "Trimmer Width: $_trimmerWidth, Start Pos: $startPosition, End Pos: $endPosition",
+              );
+              debugPrint(
+                "Start Width: ${_trimmerWidth * startPosition}, End Width: ${_trimmerWidth * (1 - endPosition)}",
+              );
+
               return Container(
                 height: 80,
+                width: double.infinity,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(color: Colors.grey[800]!, width: 1),
@@ -511,9 +604,25 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
                                     ),
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(2),
-                                      image: DecorationImage(
-                                        image: FileImage(File(thumbnail)),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(2),
+                                      child: Image.file(
+                                        File(thumbnail),
                                         fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          debugPrint(
+                                            '❌ Error loading thumbnail: $error',
+                                          );
+                                          return Container(
+                                            color: Colors.grey[800],
+                                            child: Icon(
+                                              Icons.broken_image,
+                                              color: Colors.grey[600],
+                                              size: 16,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                   ),

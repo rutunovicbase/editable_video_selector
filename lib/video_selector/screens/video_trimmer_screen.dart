@@ -86,28 +86,121 @@ class _VideoTrimmerScreenState extends State<VideoTrimmerScreen> {
 
     try {
       final duration = _controller!.value.duration;
-      final interval = duration.inMilliseconds ~/ _thumbnailCount;
+      final videoFile = File(widget.videoFile.path);
+      final fileSizeInMB = await videoFile.length() / (1024 * 1024);
+
+      // For very long videos (>500MB or >10 min), generate thumbnails from first 3 minutes only
+      final Duration effectiveDuration;
+      if (fileSizeInMB > 500 || duration.inMinutes > 10) {
+        effectiveDuration =
+            Duration(minutes: 3).inMilliseconds < duration.inMilliseconds
+            ? const Duration(minutes: 3)
+            : duration;
+        debugPrint(
+          '📹 Large video (${fileSizeInMB.toStringAsFixed(1)}MB, ${duration.inMinutes}min) - generating thumbnails from first ${effectiveDuration.inSeconds}s',
+        );
+      } else {
+        effectiveDuration = duration;
+      }
+
+      final interval = effectiveDuration.inMilliseconds ~/ _thumbnailCount;
 
       for (int i = 0; i < _thumbnailCount; i++) {
-        final timeMs = i * interval;
+        if (!mounted) break;
 
-        final thumbnail = await VideoThumbnail.thumbnailFile(
-          video: widget.videoFile.path,
-          thumbnailPath: (await getTemporaryDirectory()).path,
-          imageFormat: ImageFormat.PNG,
-          maxHeight: 100,
-          timeMs: timeMs,
-          quality: 75,
+        final timeMs = i * interval;
+        final clampedTimeMs = timeMs.clamp(
+          0,
+          effectiveDuration.inMilliseconds - 100,
         );
 
-        if (mounted) {
-          setState(() {
-            _thumbnails.add(thumbnail);
-          });
+        try {
+          // Add timeout for thumbnail generation
+          final thumbnail =
+              await VideoThumbnail.thumbnailFile(
+                video: widget.videoFile.path,
+                thumbnailPath: (await getTemporaryDirectory()).path,
+                imageFormat: ImageFormat.PNG,
+                maxHeight: 100,
+                timeMs: clampedTimeMs,
+                quality: 75,
+              ).timeout(
+                const Duration(seconds: 5),
+                onTimeout: () {
+                  debugPrint(
+                    '⏱️ Thumbnail generation timeout at ${clampedTimeMs}ms',
+                  );
+                  return null;
+                },
+              );
+
+          // Verify thumbnail file exists and is valid
+          if (thumbnail != null) {
+            final thumbnailFile = File(thumbnail);
+
+            // Retry logic - file might need time to be written
+            bool isValid = false;
+            for (int retry = 0; retry < 3; retry++) {
+              if (!mounted) break;
+
+              final exists = await thumbnailFile.exists();
+              if (exists) {
+                await Future.delayed(Duration(milliseconds: 50 * (retry + 1)));
+                final size = await thumbnailFile.length();
+                if (size > 0) {
+                  isValid = true;
+                  break;
+                }
+              }
+
+              if (retry < 2) {
+                await Future.delayed(Duration(milliseconds: 100));
+              }
+            }
+
+            if (isValid && mounted) {
+              setState(() {
+                _thumbnails.add(thumbnail);
+              });
+            } else {
+              debugPrint(
+                '⚠️ Thumbnail file invalid or empty at ${clampedTimeMs}ms after retries',
+              );
+              if (mounted) {
+                setState(() {
+                  _thumbnails.add(null);
+                });
+              }
+            }
+          } else {
+            if (mounted) {
+              setState(() {
+                _thumbnails.add(null);
+              });
+            }
+          }
+        } catch (e) {
+          debugPrint(
+            '⚠️ Failed to generate thumbnail at ${clampedTimeMs}ms: $e',
+          );
+          if (mounted) {
+            setState(() {
+              _thumbnails.add(null);
+            });
+          }
         }
       }
     } catch (e) {
-      // Handle error silently
+      debugPrint('⚠️ Thumbnail generation error: $e');
+      // Fill remaining slots with nulls
+      if (mounted) {
+        final remaining = _thumbnailCount - _thumbnails.length;
+        if (remaining > 0) {
+          setState(() {
+            _thumbnails.addAll(List.filled(remaining, null));
+          });
+        }
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -267,11 +360,20 @@ class _VideoTrimmerScreenState extends State<VideoTrimmerScreen> {
                       return Expanded(
                         child: Container(
                           margin: const EdgeInsets.symmetric(horizontal: 1),
-                          decoration: BoxDecoration(
-                            image: DecorationImage(
-                              image: FileImage(File(thumbnail)),
-                              fit: BoxFit.cover,
-                            ),
+                          child: Image.file(
+                            File(thumbnail),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              debugPrint('❌ Error loading thumbnail: $error');
+                              return Container(
+                                color: Colors.grey[800],
+                                child: Icon(
+                                  Icons.broken_image,
+                                  color: Colors.grey[600],
+                                  size: 16,
+                                ),
+                              );
+                            },
                           ),
                         ),
                       );
